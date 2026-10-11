@@ -143,6 +143,9 @@ jobs:
       - name: Test configuration
         run: |
           python -m coverage run --source=lbry -m unittest -v tests.unit.test_conf 2>&1 | tee ci-results/config-tests.log
+      - name: Test wallet sync progress
+        run: |
+          python -m coverage run --append --source=lbry -m unittest -v tests.unit.components.test_wallet_sync 2>&1 | tee ci-results/sync-progress-tests.log
       - name: Test logging
         run: |
           python -m coverage run --append --source=lbry -m unittest -v tests.unit.test_cli.CLILoggingTest 2>&1 | tee ci-results/logging-tests.log
