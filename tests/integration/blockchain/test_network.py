@@ -1,7 +1,7 @@
 import asyncio
 import hub
 
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from hub.herald import HUB_PROTOCOL_VERSION
 from hub.herald.udp import StatusServer
@@ -9,6 +9,8 @@ from hub.herald.session import LBRYElectrumX
 from hub.scribe.network import LBCRegTest
 
 from lbry.wallet.network import Network
+from lbry.wallet.header_sync import HeaderDownloader
+from lbry.wallet.transaction import Transaction, Output
 from lbry.wallet.orchstr8 import Conductor
 from lbry.wallet.orchstr8.node import SPVNode
 from lbry.wallet.rpc import RPCSession
@@ -79,6 +81,42 @@ class NetworkTests(IntegrationTestCase):
 
 
 class ReconnectTests(IntegrationTestCase):
+
+    async def test_prefetched_catchup_preserves_wallet_and_spendability(self):
+        address = await self.account.receiving.get_or_create_usable_address()
+        await self.send_to_address_and_wait(address, 2, 1)
+        addresses = await self.account.get_addresses()
+        balance = await self.account.get_balance()
+        await self.ledger.stop()
+        target = self.ledger.headers.height + 35
+        await self.blockchain.generate(35)
+
+        async def wait_for_hub():
+            while self.conductor.spv_node.server.session_manager.notified_height < target:
+                await asyncio.sleep(0.05)
+        await asyncio.wait_for(wait_for_hub(), 10)
+        progress = []
+        listener = self.ledger.on_header.listen(lambda _: progress.append(self.ledger.header_sync_progress))
+        self.addCleanup(listener.cancel)
+        with patch.object(HeaderDownloader, 'batch_size', 5):
+            await asyncio.wait_for(self.ledger.start(), 15)
+        self.assertEqual(self.ledger.headers.height, target)
+        self.assertEqual((await self.ledger.headers.hash()).decode(), await self.blockchain.get_block_hash(target))
+        self.assertTrue(any(0 < value < 100 for value in progress), progress)
+        self.assertEqual(self.ledger.header_sync_progress, 100)
+        self.assertEqual(await self.account.get_addresses(), addresses)
+        self.assertEqual(await self.account.get_balance(), balance)
+        self.assertEqual(await self.account.get_utxo_count(), 1)
+
+        destination = self.wallet.generate_account(self.ledger)
+        await self.ledger.subscribe_account(destination)
+        destination_address = await destination.receiving.get_or_create_usable_address()
+        tx = await Transaction.create(
+            [], [Output.pay_pubkey_hash(100000000, self.ledger.address_to_hash160(destination_address))],
+            [self.account], self.account
+        )
+        await self.broadcast_and_confirm(tx)
+        await self.assertBalance(destination, '1.0')
 
     async def test_multiple_servers(self):
         # we have a secondary node that connects later, so

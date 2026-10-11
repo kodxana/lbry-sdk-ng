@@ -24,6 +24,7 @@ from lbry.wallet.account import Account, AddressManager, SingleKey
 from lbry.wallet.network import Network
 from lbry.wallet.transaction import Transaction, Output
 from lbry.wallet.header import Headers, UnvalidatedHeaders
+from lbry.wallet.header_sync import HeaderDownloader
 from lbry.wallet.checkpoints import HASHES
 from lbry.wallet.constants import TXO_TYPES, CLAIM_TYPES, COIN, NULL_HASH32
 from lbry.wallet.bip32 import PublicKey, PrivateKey
@@ -399,6 +400,10 @@ class Ledger(metaclass=LedgerRegistry):
         await self.update_headers()
 
     async def update_headers(self, height=None, headers=None, subscription_update=False):
+        async with HeaderDownloader(self.network) as downloader:
+            await self._update_headers(downloader, height, headers, subscription_update)
+
+    async def _update_headers(self, downloader, height, headers, subscription_update):
         rewound = 0
         while True:
 
@@ -410,7 +415,7 @@ class Ledger(metaclass=LedgerRegistry):
                 subscription_update = False
 
             if not headers:
-                header_response = await self.network.retriable_call(self.network.get_headers, height, 2001)
+                header_response = await downloader.get(height)
                 headers = header_response['hex']
 
             if not headers:
