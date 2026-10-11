@@ -549,18 +549,21 @@ class Daemon(metaclass=JSONRPCServerType):
 
     async def stop(self):
         if self.component_startup_task is not None:
-            if self.component_startup_task.done():
-                await self.component_manager.stop()
-            else:
+            if not self.component_manager.started.is_set():
                 self.component_startup_task.cancel()
+                try:
+                    await self.component_startup_task
+                except asyncio.CancelledError:
+                    pass
                 # the wallet component might have not started
                 try:
                     wallet_component = self.component_manager.get_actual_component('wallet')
                 except NameError:
                     pass
                 else:
-                    await wallet_component.stop()
-                await self.component_manager.stop()
+                    if not wallet_component.running:
+                        await wallet_component.stop()
+            await self.component_manager.stop()
         log.info("stopped api components")
         await self.rpc_runner.cleanup()
         await self.streaming_runner.cleanup()
