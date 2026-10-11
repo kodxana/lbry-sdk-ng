@@ -1,7 +1,10 @@
 import asyncio
+import socket
+import sys
+import unittest
 from unittest import mock
 
-from lbry.testcase import AdvanceTimeTestCase
+from lbry.testcase import AdvanceTimeTestCase, AsyncioTestCase
 from lbry.blob_exchange.serialization import BlobRequest
 from lbry.blob_exchange.server import BlobServerProtocol
 
@@ -13,7 +16,8 @@ class TestBlobServerIdleTimeout(AdvanceTimeTestCase):
         self.protocol = BlobServerProtocol(
             self.loop, mock.Mock(), 'bQEaw42GXsgCAGio1nxFncJSyRmnztSCjP', idle_timeout=1)
         self.transport = mock.Mock(spec=asyncio.Transport)
-        self.transport.get_extra_info.return_value = ('127.0.0.1', 33333)
+        self.transport.get_extra_info.side_effect = lambda name: (
+            ('127.0.0.1', 33333) if name == 'peername' else None)
         self.protocol.connection_made(self.transport)
         self.addCleanup(self.protocol.connection_lost, None)
 
@@ -55,3 +59,44 @@ class TestBlobServerIdleTimeout(AdvanceTimeTestCase):
         self.transport.close.assert_not_called()
         await self.advance(0.2)
         self.transport.close.assert_called_once_with()
+
+
+@unittest.skipUnless(sys.platform == 'win32', 'Windows Proactor transport')
+class TestWindowsBlobServerShutdown(AsyncioTestCase):
+    async def test_reset_socket_does_not_block_server_shutdown(self):
+        await self.check_shutdown(ConnectionResetError(10054, 'Connection reset by peer'))
+
+    async def test_clean_socket_does_not_block_server_shutdown(self):
+        await self.check_shutdown()
+
+    async def check_shutdown(self, shutdown_error=None):
+        from asyncio.proactor_events import _ProactorBasePipeTransport
+        from asyncio.trsock import TransportSocket
+
+        sock = mock.Mock(spec=socket.socket)
+        sock.fileno.return_value = 42
+        sock.shutdown.side_effect = shutdown_error
+        sock.close.side_effect = lambda: setattr(sock.fileno, 'return_value', -1)
+        server = await self.loop.create_server(asyncio.Protocol, '127.0.0.1', 0)
+        self.addCleanup(server.close)
+        protocol = BlobServerProtocol(self.loop, mock.Mock(), 'bQEaw42GXsgCAGio1nxFncJSyRmnztSCjP')
+        self.addCleanup(sock.close)
+        # Exercise Proactor's real close callback with a deterministic socket reset.
+        transport = _ProactorBasePipeTransport(
+            self.loop, sock, protocol, server=server,
+            extra={'peername': ('127.0.0.1', 33333), 'socket': TransportSocket(sock)})
+        errors = []
+        self.loop.set_exception_handler(lambda _loop, context: errors.append(context))
+        self.addCleanup(self.loop.set_exception_handler, None)
+        await asyncio.sleep(0)
+
+        server.close()
+        transport.close()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(sock.fileno(), -1)
+        self.assertIsNone(protocol.transport)
+        await asyncio.wait_for(server.wait_closed(), 1)
+        protocol.blob_manager.connection_manager.incoming_connection_lost.assert_called_once()
