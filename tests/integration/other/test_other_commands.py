@@ -1,3 +1,4 @@
+from lbry.conf import Config
 from lbry.testcase import CommandTestCase
 
 
@@ -22,8 +23,8 @@ class SettingsManagement(CommandTestCase):
         self.assertEqual(self.daemon.jsonrpc_settings_get()['lbryum_servers'][0], ('server', 50001))
 
         setting = self.daemon.jsonrpc_settings_clear('lbryum_servers')
-        self.assertEqual(setting['lbryum_servers'][0], ('spv11.lbry.com', 50001))
-        self.assertEqual(self.daemon.jsonrpc_settings_get()['lbryum_servers'][0], ('spv11.lbry.com', 50001))
+        self.assertEqual(setting['lbryum_servers'], Config.lbryum_servers.default)
+        self.assertEqual(self.daemon.jsonrpc_settings_get()['lbryum_servers'], Config.lbryum_servers.default)
 
         # test_privacy_settings (merged for reducing test time, unmerge when its fast)
         # tests that changing share_usage_data propagates to the relevant properties
