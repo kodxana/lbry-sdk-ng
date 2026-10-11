@@ -152,9 +152,9 @@ jobs:
       - name: Test download startup cleanup
         run: |
           python -m coverage run --append --source=lbry -m unittest -v tests.unit.stream.test_downloader 2>&1 | tee ci-results/download-startup-tests.log
-      - name: Test blob server idle timeouts
+      - name: Test blob server transfers and shutdown
         run: |
-          python -m coverage run --append --source=lbry -m unittest -v tests.unit.blob_exchange.test_server 2>&1 | tee ci-results/blob-server-tests.log
+          python -m coverage run --append --source=lbry -m unittest -v tests.unit.blob_exchange.test_server tests.unit.blob_exchange.test_transfer_blob tests.unit.stream.test_stream_manager.TestStreamManager.test_download_stop_resume_delete 2>&1 | tee ci-results/blob-server-tests.log
       - name: Test full wallet suite
         run: |
           python -m coverage run --append --source=lbry -m unittest discover -v tests.unit.wallet 2>&1 | tee ci-results/wallet-tests.log
