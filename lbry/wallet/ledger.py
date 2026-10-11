@@ -151,6 +151,7 @@ class Ledger(metaclass=LedgerRegistry):
             )
         )
         self._download_height = 0
+        self.header_sync_start_height = None
 
         self._on_ready_controller = StreamController()
         self.on_ready = self._on_ready_controller.stream
@@ -373,7 +374,20 @@ class Ledger(metaclass=LedgerRegistry):
     def local_height_including_downloaded_height(self):
         return max(self.headers.height, self._download_height)
 
+    @property
+    def header_sync_progress(self):
+        height, target = self.headers.height, self.network.remote_height
+        if height >= target:
+            return 100
+        start = self.header_sync_start_height
+        if start is None or target <= start:
+            return 0
+        # Only applied headers count. Keep 100% for reaching the current tip,
+        # even when rounding a large catch-up with just one block remaining.
+        return max(0, min(99, (height - start) * 100 // (target - start)))
+
     async def initial_headers_sync(self):
+        self.header_sync_start_height = self.headers.height
         get_chunk = partial(self.network.retriable_call, self.network.get_headers, count=1000, b64=True)
         self.headers.chunk_getter = get_chunk
 

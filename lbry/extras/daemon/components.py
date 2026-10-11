@@ -1,4 +1,3 @@
-import math
 import os
 import asyncio
 import logging
@@ -148,20 +147,18 @@ class WalletComponent(Component):
 
         if self.wallet_manager.ledger.network.remote_height:
             local_height = self.wallet_manager.ledger.local_height_including_downloaded_height
-            disk_height = len(self.wallet_manager.ledger.headers)
             remote_height = self.wallet_manager.ledger.network.remote_height
-            download_height, target_height = local_height - disk_height, remote_height - disk_height
-            if target_height > 0:
-                progress = min(max(math.ceil(float(download_height) / float(target_height) * 100), 0), 100)
-            else:
-                progress = 100
-            best_hash = await self.wallet_manager.get_best_blockhash()
             result.update({
-                'headers_synchronization_progress': progress,
+                'headers_synchronization_progress': self.wallet_manager.ledger.header_sync_progress,
+                'headers_sync_start_height': self.wallet_manager.ledger.header_sync_start_height,
+                'headers_sync_target_height': remote_height,
+                'checkpoint_chunks_remaining': len(
+                    self.wallet_manager.ledger.headers.known_missing_checkpointed_chunks
+                ),
                 'blocks': max(local_height, 0),
                 'blocks_behind': max(remote_height - local_height, 0),
-                'best_blockhash': best_hash,
             })
+            result['best_blockhash'] = await self.wallet_manager.get_best_blockhash()
 
         return result
 
