@@ -190,6 +190,54 @@ The combined source, signature, and media-type filter test is also enabled. It
 checks claim identities using a signed video, a signed stream without a source,
 and a video whose signing channel has been abandoned.
 
+## Header sync
+
+Header catch-up keeps up to four batches of 2,001 headers in flight on the
+existing hub connection. It does not benchmark hubs or open extra connections.
+Responses are applied in order through the existing header validator; downloads
+alone do not advance the chain or progress. Rewinds, short batches and connection
+changes discard speculative responses. Cancellation drains the request tasks.
+Normal single-header subscription updates do not start prefetch requests.
+
+`status.wallet.headers_synchronization_progress` measures applied headers from
+the height at the start of the current sync to the hub's current tip. It is an
+integer from 0 to 100, rounded down, and cannot reach 100 while a header remains.
+Before the starting height is known it reports zero unless already caught up.
+The target can change as new blocks arrive or after reconnecting to another hub.
+This percentage is not wallet readiness or the fraction of historical header
+data cached on disk. `headers_sync_start_height`, `headers_sync_target_height`
+and `checkpoint_chunks_remaining` expose the baseline, target and separate
+background backfill. Existing component readiness checks still apply.
+
+Run the focused TCP and progress regressions with:
+
+```sh
+python -m unittest -v tests.unit.wallet.test_header_sync tests.unit.components.test_wallet_sync
+```
+
+The TCP fixture exercises reordered replies, bounded read-ahead, corrupt proof
+of work, rewinds, short/malformed replies, timeouts, disconnects, replacement
+connections, cancellation, persisted restart and a moving tip. It validates
+real mainnet headers. The blockchain suite additionally checks a funded regtest
+wallet catching up after restart, keeping its addresses, balance and UTXO, then
+signing and confirming a transfer. Existing chain-reorganization and transaction
+suites remain required.
+
+For an optional developer benchmark, supply a local file of contiguous public
+mainnet headers starting at genesis. The script reads only that file, serves it
+through a loopback TCP fixture and uses a temporary ledger. It neither opens a
+production wallet nor contacts a public hub:
+
+```sh
+PYTHONPATH=. python scripts/benchmark_header_sync.py /path/to/headers --count 20010 --latency-ms 120
+```
+
+A Windows Python 3.13 comparison on 2026-10-11 took 1.773 seconds with one request
+at a time and 0.686 seconds with four. Both made 11 requests, validated identical
+20,010-header output, and spent 0.325 seconds in validation. This is a controlled
+120 ms latency fixture, not an estimate of public-hub startup time. Validation
+cost and server throughput still limit real-world gains.
+
 ## Historical SQLite diagnostic
 
 The wallet unit suite checks batch writes through `AIOSQLite`, including

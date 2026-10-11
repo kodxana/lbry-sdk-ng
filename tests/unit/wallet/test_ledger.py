@@ -159,9 +159,13 @@ class MocHeaderNetwork(MockNetwork):
     def __init__(self, responses):
         super().__init__(None, None)
         self.responses = responses
+        self.client = object()
+        self.is_connected = True
+        self.remote_height = max(responses)
 
     async def get_headers(self, height, blocks):
-        return self.responses[height]
+        response = self.responses[height]
+        return {**response, 'hex': response['hex'].decode()}
 
 
 class BlockchainReorganizationTests(LedgerTestCase):
