@@ -127,7 +127,9 @@ class TestBlobExchange(BlobExchangeTestBase):
         server_from_second_client = make_kademlia_peer(b'1' * 48, "127.0.0.1", tcp_port=33333, allow_localhost=True)
 
         await second_client_storage.open()
+        self.addCleanup(second_client_storage.close)
         await second_client_blob_manager.setup()
+        self.addCleanup(second_client_blob_manager.stop)
 
         await self._add_blob_to_server(blob_hash, mock_blob_bytes)
 
@@ -223,7 +225,9 @@ class TestBlobExchange(BlobExchangeTestBase):
         server_from_second_client = make_kademlia_peer(b'1' * 48, "127.0.0.1", tcp_port=33333, allow_localhost=True)
 
         await second_client_storage.open()
+        self.addCleanup(second_client_storage.close)
         await second_client_blob_manager.setup()
+        self.addCleanup(second_client_blob_manager.stop)
 
         await self._add_blob_to_server(blob_hash, mock_blob_bytes)
         await self._add_blob_to_server(sd_hash, mock_sd_blob_bytes)

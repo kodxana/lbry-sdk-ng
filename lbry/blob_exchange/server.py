@@ -2,7 +2,9 @@ import asyncio
 import binascii
 import logging
 import socket
+import sys
 import typing
+from asyncio.trsock import TransportSocket
 from json.decoder import JSONDecodeError
 from lbry.blob_exchange.serialization import BlobResponse, BlobRequest, blob_response_types
 from lbry.blob_exchange.serialization import BlobAvailabilityResponse, BlobPriceResponse, BlobDownloadResponse, \
@@ -59,10 +61,20 @@ class BlobServerProtocol(asyncio.Protocol):
     def connection_lost(self, exc: typing.Optional[Exception]) -> None:
         log.debug("lost connection from %s", self.peer_address_and_port)
         self.blob_manager.connection_manager.incoming_connection_lost(self.peer_address_and_port)
-        self.transport = None
+        transport, self.transport = self.transport, None
         if self.close_on_idle_task and not self.close_on_idle_task.done():
             self.close_on_idle_task.cancel()
         self.close_on_idle_task = None
+        if sys.platform == 'win32' and transport is not None:
+            sock = transport.get_extra_info('socket')
+            if isinstance(sock, TransportSocket) and sock.fileno() != -1:
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except ConnectionResetError:
+                    # CPython's Proactor cleanup repeats shutdown() without catching
+                    # a reset. Close the socket so it can finish detaching this client
+                    # from the server instead of leaving Server.wait_closed() blocked.
+                    sock._sock.close()  # pylint: disable=protected-access
 
     def send_response(self, responses: typing.List[blob_response_types]):
         to_send = []
