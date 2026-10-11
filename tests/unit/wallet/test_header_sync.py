@@ -99,6 +99,9 @@ class HeaderSyncTests(AsyncioTestCase):
         return await asyncio.wait_for(task, 5)
 
     async def test_out_of_order_responses_are_validated_in_order_and_bounded(self):
+        # Advertise more than a window, so the fixture also catches unbounded
+        # prefetch rather than stopping requests at the remote tip by accident.
+        self.ledger.network.remote_height = 99
         gates = {height: asyncio.Event() for height in (0, 5, 10, 15)}
 
         async def reply(height, count):
@@ -118,6 +121,7 @@ class HeaderSyncTests(AsyncioTestCase):
         self.assertEqual(self.ledger.headers.height, -1)
         self.assertEqual(self.ledger.header_sync_progress, 0)
         self.assertEqual(self.requests, [0, 5, 10, 15])
+        self.ledger.network.remote_height = 19
         gates[0].set()
         await self.finish(sync)
         self.assertEqual(self.ledger.headers._read(0, 20), HEADERS)
