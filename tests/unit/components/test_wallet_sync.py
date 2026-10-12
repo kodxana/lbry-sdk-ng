@@ -27,6 +27,22 @@ class WalletSyncProgressTests(AsyncioTestCase):
     async def progress(self):
         return (await self.component.get_status())['headers_synchronization_progress']
 
+    async def test_history_status_is_separate_from_headers_and_exposes_no_addresses(self):
+        self.ledger.network.remote_height = 0
+        with self.ledger.history_sync.track(('history', 'private test address')):
+            self.ledger.history_sync.entries_total = 250
+            self.ledger.history_sync.entries_completed = 100
+            status = await self.component.get_status()
+            self.assertEqual(status['history_sync'], {
+                'state': 'syncing', 'entries_total': 250, 'entries_completed': 100,
+                'pending_operations': 1, 'connected': False
+            })
+            self.assertNotIn('private test address', str(status))
+        status = await self.component.get_status()
+        self.assertEqual(status['history_sync']['state'], 'complete')
+        # Even completed local work does not claim a live connection.
+        self.assertFalse(status['history_sync']['connected'])
+
     async def test_applied_headers_advance_progress_without_rounding_to_completion(self):
         self.ledger.header_sync_start_height = self.ledger.headers.height
         self.assertEqual(await self.progress(), 0)
