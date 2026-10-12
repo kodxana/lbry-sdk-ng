@@ -172,8 +172,9 @@ class WalletComponent(Component):
         await self.wallet_manager.start()
 
     async def stop(self):
-        await self.wallet_manager.stop()
-        self.wallet_manager = None
+        if self.wallet_manager is not None:
+            await self.wallet_manager.stop()
+            self.wallet_manager = None
 
 
 class WalletServerPaymentsComponent(Component):
