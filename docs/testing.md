@@ -238,6 +238,31 @@ at a time and 0.686 seconds with four. Both made 11 requests, validated identica
 120 ms latency fixture, not an estimate of public-hub startup time. Validation
 cost and server throughput still limit real-world gains.
 
+## Wallet history progress
+
+`status.wallet.history_sync` reports address discovery and transaction-history
+work separately from headers. Its state is `idle`, `syncing`, `incomplete`, or
+`complete`; `connected` reports the current hub connection independently.
+`entries_completed` counts entries after their batch has been saved to the
+wallet database, and `entries_total` counts work discovered during the current
+round. An entry belongs to one address: the same transaction can occur in more
+than one address history. These are not unique transaction counts or an overall
+percentage. Totals can grow as additional addresses are discovered, and reset
+when another round starts. No addresses or transaction IDs are exposed.
+
+Queued updates and address discovery keep the state at `syncing`. Failed or
+cancelled work remains `incomplete` until the affected operation succeeds;
+unrelated successful updates cannot clear it. A disconnected wallet may have
+completed its last round but is not known to be current. Clients must check
+connection and header status as well, and treat missing history status as unknown.
+
+Run `python -m unittest -v tests.unit.wallet.test_history_sync
+tests.unit.components.test_wallet_sync` for the focused checks. A 250-entry
+fixture uses the real wallet database and accounting path to exercise saved-batch
+progress, duplicate notifications, address discovery, failed writes, cancellation
+before execution, interruption after a saved batch and successful retry without
+double-counting the balance. The existing wallet and regtest suites remain required.
+
 ## Historical SQLite diagnostic
 
 The wallet unit suite checks batch writes through `AIOSQLite`, including

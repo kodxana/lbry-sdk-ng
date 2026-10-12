@@ -142,7 +142,11 @@ class WalletComponent(Component):
                 } for session in sessions
             ],
             'known_servers': len(self.wallet_manager.ledger.network.known_hubs),
-            'available_servers': 1 if is_connected else 0
+            'available_servers': 1 if is_connected else 0,
+            'history_sync': {
+                **self.wallet_manager.ledger.history_sync.status,
+                'connected': bool(is_connected),
+            }
         }
 
         if self.wallet_manager.ledger.network.remote_height:
