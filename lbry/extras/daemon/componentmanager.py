@@ -118,7 +118,8 @@ class ComponentManager:
                 component._setup() for component in stage if not component.running
             ]
             if needing_start:
-                await asyncio.wait(map(asyncio.create_task, needing_start))
+                # Cancelling startup must also cancel and drain this stage's tasks.
+                await asyncio.gather(*needing_start, return_exceptions=True)
         self.started.set()
 
     async def stop(self):
