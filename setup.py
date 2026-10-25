@@ -33,7 +33,7 @@ setup(
         'appdirs==1.4.4',
         'asn1crypto==1.5.1',
         'packaging==26.3',
-        'certifi==2026.7.22',
+        'certifi==2026.10.19',
         'colorama==0.4.6',
         'distro==1.9.0',
         'base58==2.1.1',
@@ -41,7 +41,6 @@ setup(
         'cryptography==50.0.2',
         'protobuf==7.36.2',
         'prometheus_client==0.26.0',
-        'ecdsa==0.19.2',
         'pyyaml==6.0.3',
         'docopt==0.6.2',
         'hachoir==3.4.0',
@@ -59,7 +58,7 @@ setup(
             'jsonschema==4.26.0',
         ],
         'hub': [
-            'hub@git+https://github.com/kodxana/lbry-hub-ng.git@c7b4ead5b319a9a4ad9c4240487ce41cf1a081de'
+            'hub@git+https://github.com/kodxana/lbry-hub-ng.git@87d96e0244ac696562c44c916bf95a5cb3b3dae8'
         ]
     },
     classifiers=[
