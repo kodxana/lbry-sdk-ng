@@ -3,7 +3,6 @@ import tempfile
 import logging
 import asyncio
 from binascii import unhexlify
-import ecdsa
 
 from .fixtures import prepare_video
 
