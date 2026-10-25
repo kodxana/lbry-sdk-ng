@@ -7,7 +7,7 @@ in `docker/test-constraints.txt`. This image is a test environment.
 See the [Python compatibility audit](python-compatibility.md) for the known
 historical installation findings and the migration status.
 
-The Linux test image installs the pinned Hub with `lbry-rocksdb-ng` 0.8.3 from
+The Linux test image installs the pinned Hub with `lbry-rocksdb-ng` 0.8.4 from
 its hash-pinned GitHub release. Docker rebuilds the environment when these
 dependency pins change. For an existing source installation with the `hub`
 extra, create a fresh virtual environment: the old `lbry-rocksdb` distribution
