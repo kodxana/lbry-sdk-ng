@@ -58,7 +58,7 @@ setup(
             'jsonschema==4.26.0',
         ],
         'hub': [
-            'hub@git+https://github.com/kodxana/lbry-hub-ng.git@87d96e0244ac696562c44c916bf95a5cb3b3dae8'
+            'hub@git+https://github.com/kodxana/lbry-hub-ng.git@5f71c8e6e6ec42c7b32f8c901e8fde8e767203e1'
         ]
     },
     classifiers=[

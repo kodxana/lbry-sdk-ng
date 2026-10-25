@@ -62,4 +62,4 @@ ujson==6.0.0
 urllib3==2.8.0
 wheel==0.48.0
 yarl==1.25.1
-lbry-rocksdb-ng==0.8.3
+lbry-rocksdb-ng==0.8.4
