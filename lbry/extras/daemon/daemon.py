@@ -1248,8 +1248,13 @@ class Daemon(metaclass=JSONRPCServerType):
         wallet = self.wallet_manager.get_wallet_or_default(wallet_id)
         if value and isinstance(value, str) and value[0] in ('[', '{'):
             value = json.loads(value)
+        previous_preferences = wallet.preferences.data.copy()
         wallet.preferences[key] = value
-        wallet.save()
+        try:
+            wallet.save()
+        except BaseException:
+            wallet.preferences.data = previous_preferences
+            raise
         return {key: value}
 
     WALLET_DOC = """
@@ -1351,11 +1356,39 @@ class Daemon(metaclass=JSONRPCServerType):
             return wallet.to_json()
         return wallet.pack(password).decode()
 
+    def jsonrpc_wallet_import_preview(self, file_name, password=None):
+        """
+        Check a staged wallet copy without starting wallet sync or changing keys.
+
+        Usage:
+            wallet_import_preview <file_name> [--password=<password>]
+
+        Options:
+            --file_name=<file_name> : (str) staging file in data_dir/wallet-import
+            --password=<password>  : (str) password to check encrypted accounts
+
+        Returns:
+            (dict) account/channel counts or a non-sensitive validation error
+        """
+        from lbry.wallet.import_preview import preview_wallet  # pylint: disable=import-outside-toplevel
+        if not isinstance(file_name, str) or not re.fullmatch(r'[a-f0-9]{32}\.wallet', file_name):
+            return {'ok': False, 'error': 'file'}
+        root = os.path.realpath(self.conf.data_dir)
+        directory = os.path.realpath(os.path.join(root, 'wallet-import'))
+        path = os.path.realpath(os.path.join(directory, file_name))
+        if os.path.dirname(directory) != root or os.path.dirname(path) != directory or not os.path.isfile(path):
+            return {'ok': False, 'error': 'file'}
+        ledger_id = {'lbrycrd_main': 'lbc_mainnet', 'lbrycrd_testnet': 'lbc_testnet',
+                     'lbrycrd_regtest': 'lbc_regtest'}[self.conf.blockchain_name]
+        return preview_wallet(path, ledger_id, password)
+
     @requires("wallet")
     async def jsonrpc_wallet_import(self, data, password=None, wallet_id=None, blocking=False):
         """
         Import wallet data and merge accounts and preferences. Data is expected to be JSON if
         password is not supplied.
+
+        The destination wallet keeps its local encryption setting and password.
 
         Wallet must be unlocked to perform this operation.
 
@@ -1373,7 +1406,9 @@ class Daemon(metaclass=JSONRPCServerType):
             (str) base64-encoded encrypted wallet, or cleartext JSON
         """
         wallet = self.wallet_manager.get_wallet_or_default(wallet_id)
-        added_accounts, merged_accounts = wallet.merge(self.wallet_manager, password, data)
+        added_accounts, merged_accounts = wallet.merge(
+            self.wallet_manager, password, data, preserve_local_encryption=True
+        )
         for new_account in itertools.chain(added_accounts, merged_accounts):
             await new_account.maybe_migrate_certificates()
         if added_accounts and self.ledger.network.is_connected:
@@ -1990,24 +2025,31 @@ class Daemon(metaclass=JSONRPCServerType):
         """
         wallet = self.wallet_manager.get_wallet_or_default(wallet_id)
         wallet_changed = False
-        if data is not None:
-            added_accounts, merged_accounts = wallet.merge(self.wallet_manager, password, data)
-            for new_account in itertools.chain(added_accounts, merged_accounts):
-                await new_account.maybe_migrate_certificates()
-            if added_accounts and self.ledger.network.is_connected:
-                if blocking:
-                    await asyncio.wait([
-                        asyncio.create_task(a.ledger.subscribe_account(a)) for a in added_accounts
-                    ])
-                else:
-                    for new_account in added_accounts:
-                        asyncio.create_task(self.ledger.subscribe_account(new_account))
-            wallet_changed = True
-        if wallet.preferences.get(ENCRYPT_ON_DISK, False) and password != wallet.encryption_password:
-            wallet.encryption_password = password
-            wallet_changed = True
-        if wallet_changed:
-            wallet.save()
+        previous_preferences = wallet.preferences.data.copy()
+        previous_password = wallet.encryption_password
+        try:
+            if data is not None:
+                added_accounts, merged_accounts = wallet.merge(self.wallet_manager, password, data)
+                for new_account in itertools.chain(added_accounts, merged_accounts):
+                    await new_account.maybe_migrate_certificates()
+                if added_accounts and self.ledger.network.is_connected:
+                    if blocking:
+                        await asyncio.wait([
+                            asyncio.create_task(a.ledger.subscribe_account(a)) for a in added_accounts
+                        ])
+                    else:
+                        for new_account in added_accounts:
+                            asyncio.create_task(self.ledger.subscribe_account(new_account))
+                wallet_changed = True
+            if wallet.preferences.get(ENCRYPT_ON_DISK, False) and password != wallet.encryption_password:
+                wallet.encryption_password = password
+                wallet_changed = True
+            if wallet_changed:
+                wallet.save()
+        except BaseException:
+            wallet.preferences.data = previous_preferences
+            wallet.encryption_password = previous_password
+            raise
         encrypted = wallet.pack(password)
         return {
             'hash': self.jsonrpc_sync_hash(wallet_id),

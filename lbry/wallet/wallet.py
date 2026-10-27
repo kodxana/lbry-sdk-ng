@@ -1,24 +1,22 @@
 import os
 import time
 import stat
+import tempfile
 import json
 import zlib
 import typing
-import logging
 from typing import List, Sequence, MutableSequence, Optional
 from collections import UserDict
 from hashlib import sha256
 from operator import attrgetter
 from lbry.crypto.crypt import better_aes_encrypt, better_aes_decrypt
-from lbry.error import InvalidPasswordError
+from lbry.error import InvalidPasswordError, WalletError
 from .account import Account
 
 if typing.TYPE_CHECKING:
     from lbry.wallet.manager import WalletManager
     from lbry.wallet.ledger import Ledger
 
-
-log = logging.getLogger(__name__)
 
 ENCRYPT_ON_DISK = 'encrypt-on-disk'
 
@@ -145,14 +143,15 @@ class Wallet:
 
     def save(self):
         if self.preferences.get(ENCRYPT_ON_DISK, False):
-            if self.encryption_password is not None:
+            if self.encryption_password:
                 return self.storage.write(self.to_dict(encrypt_password=self.encryption_password))
-            elif not self.is_locked:
-                log.warning(
-                    "Disk encryption requested but no password available for encryption. "
-                    "Resetting encryption preferences and saving wallet in an unencrypted state."
+            if any(not account.encrypted and (
+                    account.seed or account.private_key or account.private_key_string
+            ) for account in self.accounts):
+                raise WalletError(
+                    "Cannot save wallet without its encryption password. "
+                    "Unlock or encrypt the wallet before saving."
                 )
-                self.preferences[ENCRYPT_ON_DISK] = False
         return self.storage.write(self.to_dict())
 
     @property
@@ -187,15 +186,18 @@ class Wallet:
             raise
         return json.loads(decompressed)
 
-    def merge(self, manager: 'WalletManager',
-              password: str, data: str) -> (List['Account'], List['Account']):
+    def merge(self, manager: 'WalletManager', password: str, data: str,
+              *, preserve_local_encryption=False) -> (List['Account'], List['Account']):
         assert not self.is_locked, "Cannot sync apply on a locked wallet."
         added_accounts, merged_accounts = [], []
         if password is None:
             decrypted_data = json.loads(data)
         else:
             decrypted_data = self.unpack(password, data)
-        self.preferences.merge(decrypted_data.get('preferences', {}))
+        preferences = decrypted_data.get('preferences', {}).copy()
+        if preserve_local_encryption:
+            preferences.pop(ENCRYPT_ON_DISK, None)
+        self.preferences.merge(preferences)
         for account_dict in decrypted_data['accounts']:
             ledger = manager.get_or_create_ledger(account_dict['ledger'])
             _, _, pubkey = Account.keys_from_dict(ledger, account_dict)
@@ -246,16 +248,25 @@ class Wallet:
 
     def decrypt(self):
         assert not self.is_locked, "Cannot decrypt a locked wallet, unlock first."
-        self.preferences[ENCRYPT_ON_DISK] = False
-        self.save()
-        return True
+        return self._set_encryption(False, self.encryption_password)
 
     def encrypt(self, password):
         assert not self.is_locked, "Cannot re-encrypt a locked wallet, unlock first."
         assert password, "Cannot encrypt with blank password."
+        return self._set_encryption(True, password)
+
+    def _set_encryption(self, enabled, password):
+        previous_password = self.encryption_password
+        previous_preferences = self.preferences.data.copy()
         self.encryption_password = password
-        self.preferences[ENCRYPT_ON_DISK] = True
-        self.save()
+        self.preferences[ENCRYPT_ON_DISK] = enabled
+        try:
+            self.save()
+        except BaseException:
+            # A later background save must not commit a failed password change.
+            self.encryption_password = previous_password
+            self.preferences.data = previous_preferences
+            raise
         return True
 
 
@@ -277,22 +288,17 @@ class WalletStorage:
             with open(self.path, 'r') as f:
                 json_data = f.read()
                 json_dict = json.loads(json_data)
-                if json_dict.get('version') == self.LATEST_VERSION and \
-                        set(json_dict) == set(self._default):
-                    return json_dict
-                else:
-                    return self.upgrade(json_dict)
+                return self.upgrade(json_dict)
         else:
             return self._default.copy()
 
     def upgrade(self, json_dict):
-        json_dict = json_dict.copy()
-        version = json_dict.pop('version', -1)
-        if version == -1:
-            pass
-        upgraded = self._default.copy()
-        upgraded.update(json_dict)
-        return json_dict
+        if not isinstance(json_dict, dict):
+            raise WalletError("Wallet file must contain a JSON object.")
+        version = json_dict.get('version', self.LATEST_VERSION)
+        if isinstance(version, bool) or not isinstance(version, int) or version != self.LATEST_VERSION:
+            raise WalletError("Unsupported wallet version. Wallet was not modified.")
+        return json_dict.copy()
 
     def write(self, json_dict):
 
@@ -300,15 +306,23 @@ class WalletStorage:
         if self.path is None:
             return json_data
 
-        temp_path = "{}.tmp.{}".format(self.path, os.getpid())
-        with open(temp_path, "w") as f:
-            f.write(json_data)
-            f.flush()
-            os.fsync(f.fileno())
-
         if os.path.exists(self.path):
             mode = os.stat(self.path).st_mode
         else:
             mode = stat.S_IREAD | stat.S_IWRITE
-        os.chmod(temp_path, mode)
-        os.replace(temp_path, self.path)
+        fd, temp_path = tempfile.mkstemp(
+            prefix=os.path.basename(self.path) + '.', suffix='.tmp',
+            dir=os.path.dirname(os.path.abspath(self.path))
+        )
+        try:
+            with os.fdopen(fd, 'w') as f:
+                f.write(json_data)
+                f.flush()
+                os.fsync(f.fileno())
+            os.chmod(temp_path, mode)
+            os.replace(temp_path, self.path)
+        finally:
+            try:
+                os.unlink(temp_path)
+            except FileNotFoundError:
+                pass

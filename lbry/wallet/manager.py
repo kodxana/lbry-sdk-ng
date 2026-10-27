@@ -120,9 +120,9 @@ class WalletManager:
     def migrate_lbryum_to_torba(path):
         if not os.path.exists(path):
             return None, None
-        with open(path, 'r') as f:
-            unmigrated_json = f.read()
-            unmigrated = json.loads(unmigrated_json)
+        with open(path, 'rb') as f:
+            unmigrated_bytes = f.read()
+            unmigrated = json.loads(unmigrated_bytes)
         # TODO: After several public releases of new torba based wallet, we can delete
         #       this lbryum->torba conversion code and require that users who still
         #       have old structured wallets install one of the earlier releases that
@@ -137,7 +137,7 @@ class WalletManager:
         log.info("Wallet migrator found %s receiving addresses and %s change addresses. %s in total on history.",
                  len(receiving_addresses), len(change_addresses), len(total))
 
-        migrated_json = json.dumps({
+        migrated = {
             'version': 1,
             'name': 'My Wallet',
             'accounts': [{
@@ -156,20 +156,29 @@ class WalletManager:
                     'change': {'gap': 6, 'maximum_uses_per_address': 1}
                 }
             }]
-        }, indent=4, sort_keys=True)
-        mode = os.stat(path).st_mode
+        }
         i = 1
         backup_path_template = os.path.join(os.path.dirname(path), "old_lbryum_wallet") + "_%i"
-        while os.path.isfile(backup_path_template % i):
-            i += 1
-        os.rename(path, backup_path_template % i)
-        temp_path = f"{path}.tmp.{os.getpid()}"
-        with open(temp_path, "w") as f:
-            f.write(migrated_json)
-            f.flush()
-            os.fsync(f.fileno())
-        os.rename(temp_path, path)
-        os.chmod(path, mode)
+        while True:
+            backup_path = backup_path_template % i
+            try:
+                fd = os.open(backup_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+                break
+            except FileExistsError:
+                i += 1
+        try:
+            with os.fdopen(fd, 'wb') as f:
+                f.write(unmigrated_bytes)
+                f.flush()
+                os.fsync(f.fileno())
+            with open(backup_path, 'rb') as f:
+                if f.read() != unmigrated_bytes:
+                    raise OSError("Wallet recovery copy verification failed.")
+        except BaseException:
+            os.unlink(backup_path)
+            raise
+        # Keep the original at its startup path until the replacement is ready.
+        WalletStorage(path).write(migrated)
         return receiving_addresses, change_addresses
 
     @classmethod
