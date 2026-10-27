@@ -3,6 +3,8 @@ import json
 import string
 from binascii import unhexlify
 from random import Random
+from pathlib import Path
+from unittest import mock
 
 from lbry.wallet import ENCRYPT_ON_DISK
 from lbry.error import InvalidPasswordError
@@ -366,6 +368,62 @@ class WalletEncryptionAndSynchronization(CommandTestCase):
         self.assertTrue(await daemon2.jsonrpc_wallet_unlock("password"))
         self.assertEqual(daemon2.jsonrpc_wallet_status(),
                          {'is_locked': False, 'is_encrypted': True, 'is_syncing': False})
+
+    async def test_failed_password_change_reloads_and_signs_with_original_keys(self):
+        daemon, daemon2 = self.daemon, self.daemon2
+        channel = await self.channel_create('@recovery')
+        channel_id = self.get_claim_id(channel)
+        exported = await daemon.jsonrpc_channel_export(channel_id)
+        await daemon2.jsonrpc_channel_import(exported)
+        expected_signature = await daemon2.jsonrpc_channel_sign(
+            channel_id=channel_id, hexdata='01234567', salt='beef'
+        )
+        wallet = daemon2.wallet_manager.default_wallet
+        daemon2.jsonrpc_wallet_encrypt('original password')
+        original = Path(wallet.storage.path).read_bytes()
+        with mock.patch('lbry.wallet.wallet.os.replace', side_effect=OSError('injected replacement failure')):
+            with self.assertRaises(OSError):
+                daemon2.jsonrpc_wallet_encrypt('new password')
+        self.assertEqual(original, Path(wallet.storage.path).read_bytes())
+
+        ledger = daemon2.ledger
+        for account in wallet.accounts:
+            await ledger.unsubscribe_account(account)
+            ledger.accounts.remove(account)
+        daemon2.wallet_manager.wallets.remove(wallet)
+        wallet.accounts.clear()
+        reopened = await daemon2.jsonrpc_wallet_add(wallet.id)
+        self.assertIsNot(wallet, reopened)
+        self.assertTrue(reopened.is_locked)
+        self.assertFalse(await daemon2.jsonrpc_wallet_unlock('new password'))
+        self.assertTrue(await daemon2.jsonrpc_wallet_unlock('original password'))
+        self.assertEqual(expected_signature, await daemon2.jsonrpc_channel_sign(
+            channel_id=channel_id, hexdata='01234567', salt='beef'
+        ))
+        address = (await self.account.receiving.get_addresses(limit=1))[0]
+        tx = await daemon2.jsonrpc_wallet_send('0.1', address)
+        await self.confirm_tx(tx.id, daemon2.ledger)
+
+    async def test_wallet_import_keeps_local_password_and_encryption(self):
+        daemon, daemon2 = self.daemon, self.daemon2
+        wallet = daemon.wallet_manager.default_wallet
+        daemon.jsonrpc_wallet_encrypt('local password')
+        daemon2.jsonrpc_preference_set(ENCRYPT_ON_DISK, False)
+        exported = await daemon2.jsonrpc_wallet_export('backup password')
+        await daemon.jsonrpc_wallet_import(exported, 'backup password', blocking=True)
+        self.assertEqual('local password', wallet.encryption_password)
+        self.assertWalletEncrypted(wallet.storage.path, True)
+        daemon.jsonrpc_wallet_lock()
+        self.assertFalse(await daemon.jsonrpc_wallet_unlock('backup password'))
+        self.assertTrue(await daemon.jsonrpc_wallet_unlock('local password'))
+
+        daemon.jsonrpc_wallet_decrypt()
+        daemon2.jsonrpc_wallet_encrypt('other local password')
+        exported = await daemon2.jsonrpc_wallet_export('backup password')
+        await daemon.jsonrpc_wallet_import(exported, 'backup password', blocking=True)
+        self.assertFalse(wallet.preferences[ENCRYPT_ON_DISK])
+        self.assertWalletEncrypted(wallet.storage.path, False)
+        await self.channel_create('@after-import')
 
     async def test_locking_unlocking_does_not_break_deterministic_channels(self):
         self.assertTrue(self.daemon.jsonrpc_wallet_encrypt("password"))
