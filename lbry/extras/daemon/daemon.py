@@ -1356,6 +1356,32 @@ class Daemon(metaclass=JSONRPCServerType):
             return wallet.to_json()
         return wallet.pack(password).decode()
 
+    def jsonrpc_wallet_import_preview(self, file_name, password=None):
+        """
+        Check a staged wallet copy without starting wallet sync or changing keys.
+
+        Usage:
+            wallet_import_preview <file_name> [--password=<password>]
+
+        Options:
+            --file_name=<file_name> : (str) staging file in data_dir/wallet-import
+            --password=<password>  : (str) password to check encrypted accounts
+
+        Returns:
+            (dict) account/channel counts or a non-sensitive validation error
+        """
+        from lbry.wallet.import_preview import preview_wallet  # pylint: disable=import-outside-toplevel
+        if not isinstance(file_name, str) or not re.fullmatch(r'[a-f0-9]{32}\.wallet', file_name):
+            return {'ok': False, 'error': 'file'}
+        root = os.path.realpath(self.conf.data_dir)
+        directory = os.path.realpath(os.path.join(root, 'wallet-import'))
+        path = os.path.realpath(os.path.join(directory, file_name))
+        if os.path.dirname(directory) != root or os.path.dirname(path) != directory or not os.path.isfile(path):
+            return {'ok': False, 'error': 'file'}
+        ledger_id = {'lbrycrd_main': 'lbc_mainnet', 'lbrycrd_testnet': 'lbc_testnet',
+                     'lbrycrd_regtest': 'lbc_regtest'}[self.conf.blockchain_name]
+        return preview_wallet(path, ledger_id, password)
+
     @requires("wallet")
     async def jsonrpc_wallet_import(self, data, password=None, wallet_id=None, blocking=False):
         """
