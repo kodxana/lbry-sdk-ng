@@ -80,6 +80,68 @@ Desktop can then offer clear backup, unlock and migration choices. Existing
 users should retain a working wallet throughout that rollout; completing this
 persistence patch alone is not grounds for mandatory encryption migration.
 
+## First run, existing users and separate profiles
+
+Desktop NG currently creates a dedicated application profile, supplies explicit
+SDK data/wallet/download/config paths, filters inherited SDK overrides and checks
+ownership before using or stopping a daemon. Standalone SDK defaults in
+`lbry/conf.py` still discover legacy `lbrynet` and `lbryum` directories. This patch
+does not change those defaults. Moving them without integrated setup could make
+an existing user's wallet appear to be missing.
+
+Before enabling the new format, SDK and Desktop must provide an explicit NG
+profile and a setup flow that runs before wallet creation and synchronization:
+
+- New users choose **Import an existing wallet** or **Create a separate wallet**.
+  Explain backup requirements and Odysee sync compatibility before confirmation.
+- Existing NG users get **Keep my current wallet**, **Migrate a copy**, or
+  **Create a separate wallet**. Dismissing or postponing this prompt keeps their
+  current wallet. Creating a separate wallet must never overwrite or hide the
+  existing one; switching back must remain available.
+- Read legacy sources only to make an explicitly selected, consistent copy.
+  Leave their wallets, databases, config, blobs, downloads and backups intact.
+  Require the source application to be stopped for a file-level snapshot.
+  Never point the NG daemon at the source or reuse its running RPC service.
+- Resolve real paths, junctions and symlinks before checking ownership and
+  overlap. Reject source/destination aliases and nested directories that could
+  expose legacy files to NG migration or cleanup. Honor platform case rules.
+- Persist setup decisions and migration completion so updates do not repeatedly
+  prompt or silently migrate. Test interruption before and after each commit
+  point, resume/retry, rollback and switching back to the old application.
+
+Use a concrete notice before converting an Odysee-connected wallet:
+
+> This creates a local NG copy. Automatic wallet synchronization with Odysee
+> will be disabled for this copy until a compatible sync method is available.
+> Your original wallet will stay in its current folder. Both copies control the
+> same blockchain funds, so payments made from either copy affect that balance.
+
+Odysee login and wallet sync must be separate choices. Do not upload a new-format
+wallet to the legacy service or overwrite its remote snapshot as a side effect
+of login or migration. A compatibility mode may keep the existing format and
+sync contract while the user postpones conversion. Test login, logout, offline
+startup, password changes and retry with both old and migrated profiles.
+
+## Optional blob import
+
+Offer blob import separately from wallet migration, with a destination, space
+estimate and a cancel/resume option. Copy into NG-owned storage, verify each
+blob's content hash and size, and only then register it as complete. Do not trust
+hash-looking filenames or silently adopt the old blob directory. Skip identical
+verified blobs and leave corrupt, partial or unreadable source files untouched.
+
+Import or reconstruct stream-descriptor relationships and relevant download
+metadata so valid imported content can be found and served. Having blob files
+alone does not recreate the complete downloads library. Test discovery,
+playback, document materialization and P2P serving after import, including
+missing descriptors and interrupted copies. Media-file import is a separate
+option; users should not have to create both media and blob copies just to seed.
+
+Ordinary copying needs additional disk space. A verified copy-on-write clone
+may avoid that on supported filesystems, but it must not be promised across
+drives. Do not use shared writable folders or symlinks to bypass profile
+isolation. NG cleanup must never delete files in the legacy source.
+
 ## Validation
 
 Use generated, unfunded fixture wallets and the isolated regtest environment:
