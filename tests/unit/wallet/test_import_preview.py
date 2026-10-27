@@ -74,6 +74,17 @@ class ImportPreviewTests(AsyncioTestCase):
         with mock.patch('lbry.wallet.import_preview.MAX_WALLET_BYTES', 8):
             self.assertEqual('size', self.preview()['error'])
 
+    def test_inconsistent_encryption_preferences_are_rejected(self):
+        data = self.wallet.to_dict()
+        data['preferences']['encrypt-on-disk'] = {'value': True, 'ts': 1}
+        self.path.write_text(json.dumps(data))
+        self.assertEqual('encryption', self.preview()['error'])
+        self.wallet.encrypt('fixture-password')
+        data = json.loads(self.path.read_bytes())
+        data['preferences']['encrypt-on-disk']['value'] = False
+        self.path.write_text(json.dumps(data))
+        self.assertEqual('encryption', self.preview('fixture-password')['error'])
+
     def test_rpc_only_accepts_staged_files(self):
         daemon = SimpleNamespace(conf=SimpleNamespace(data_dir=str(self.root), blockchain_name='lbrycrd_main'))
         for name in ('../default_wallet', str(self.path), 'a.wallet', None):

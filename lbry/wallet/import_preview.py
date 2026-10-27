@@ -7,7 +7,7 @@ from .bip32 import PrivateKey, PublicKey, from_extended_key_string
 from .manager import WalletManager
 from .database import Database
 from .header import Headers
-from .wallet import Wallet, WalletStorage
+from .wallet import Wallet, WalletStorage, ENCRYPT_ON_DISK
 
 MAX_WALLET_BYTES = 8 * 1024 * 1024
 
@@ -33,6 +33,12 @@ def preview_wallet(path, ledger_id, password=None):
         if any(not isinstance(account, dict) or account.get('ledger') != ledger_id for account in accounts):
             return {'ok': False, 'error': 'network'}
         encrypted = sum(account.get('encrypted') is True for account in accounts)
+        encrypt_on_disk = preferences.get(ENCRYPT_ON_DISK, {}).get('value', False)
+        if not isinstance(encrypt_on_disk, bool) or (encrypted and not encrypt_on_disk):
+            return {'ok': False, 'error': 'encryption'}
+        if encrypt_on_disk and any(not account.get('encrypted') and
+                                   (account.get('seed') or account.get('private_key')) for account in accounts):
+            return {'ok': False, 'error': 'encryption'}
         if encrypted and password is None:
             return {'ok': False, 'error': 'password-required'}
         manager = WalletManager()
