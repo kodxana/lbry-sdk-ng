@@ -133,7 +133,11 @@ class BinaryTests(unittest.TestCase):
             timeout=60, check=True).stdout
 
     @contextlib.contextmanager
-    def daemon(self):
+    def daemon(self, settings_only=False):
+        if settings_only:
+            configuration = json.loads(self.config.read_text(encoding='utf-8'))
+            configuration['components_to_skip'] = SKIPPED_COMPONENTS + ['database', 'wallet']
+            self.config.write_text(json.dumps(configuration), encoding='utf-8')
         self.sequence += 1
         log_path = self.log_dir / f'{self._testMethodName}-{self.sequence}.log'
         with log_path.open('w', encoding='utf-8') as log:
@@ -154,7 +158,8 @@ class BinaryTests(unittest.TestCase):
                             pass  # the HTTP listener starts before the wallet is available
                         else:
                             if status['is_running']:
-                                self.assertEqual(status['startup_status'], {'database': True, 'wallet': True})
+                                self.assertEqual(status['startup_status'], {} if settings_only else
+                                                 {'database': True, 'wallet': True})
                                 break
                     time.sleep(.2)
                 else:
@@ -206,6 +211,26 @@ class BinaryTests(unittest.TestCase):
         for field in ('seed', 'private_key'):
             self.assertTrue(original[field])
             self.assertNotIn(original[field], path.read_text(encoding='utf-8'))
+
+    def test_import_preview_before_wallet_startup(self):
+        with self.daemon():
+            self.rpc('wallet_encrypt', new_password='import-fixture-password')
+        original = (self.wallets / 'default_wallet').read_bytes()
+        directory = self.work / 'data' / 'wallet-import'
+        directory.mkdir()
+        file_name = 'a' * 32 + '.wallet'
+        staged = directory / file_name
+        staged.write_bytes(original)
+        with self.daemon(settings_only=True):
+            self.assertEqual(self.rpc('wallet_import_preview', file_name='../default_wallet'),
+                             {'ok': False, 'error': 'file'})
+            self.assertEqual(self.rpc('wallet_import_preview', file_name=file_name)['error'], 'password-required')
+            self.assertFalse(self.rpc('wallet_import_preview', file_name=file_name, password='wrong')['ok'])
+            self.assertEqual(self.rpc('wallet_import_preview', file_name=file_name, password='import-fixture-password'),
+                             {'ok': True, 'accounts': 1, 'channels': 0, 'encrypted': True})
+            self.assertEqual(self.rpc('status')['startup_status'], {})
+        self.assertEqual(original, staged.read_bytes())
+        self.assertEqual(original, (self.wallets / 'default_wallet').read_bytes())
 
     def test_new_wallet_restart(self):
         self.assertEqual(self.cli('--version').strip(), f'lbrynet {self.expected_version}')
